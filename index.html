@@ -21,13 +21,7 @@
             --text-light: #7f8c8d;
         }
 
-        body { 
-            background-color: var(--bg-color); 
-            font-family: 'PingFang TC', 'Microsoft JhengHei', sans-serif; 
-            margin: 0; padding: 40px 20px; 
-            color: var(--text-dark);
-        }
-
+        body { background-color: var(--bg-color); font-family: 'PingFang TC', 'Microsoft JhengHei', sans-serif; margin: 0; padding: 40px 20px; color: var(--text-dark); }
         .container { max-width: 1100px; margin: 0 auto; background: var(--card-bg); padding: 30px; border-radius: 15px; box-shadow: 0 10px 30px rgba(0,0,0,0.05); }
         .header { display: flex; justify-content: space-between; align-items: center; margin-bottom: 25px; }
         .title-group { display: flex; align-items: center; gap: 15px; }
@@ -87,7 +81,6 @@
 </div>
 
 <script>
-    // 1. Firebase 配置
     const firebaseConfig = {
       apiKey: "AIzaSyDig0LXShXvoUC-Q_jsB4fnt04ndT4AKMI",
       authDomain: "fucking-semantic.firebaseapp.com",
@@ -101,12 +94,10 @@
     firebase.initializeApp(firebaseConfig);
     const db = firebase.firestore();
 
-    // 2. 加載數據
     async function fetchData() {
         const tbody = document.getElementById('table-body');
         try {
             const snapshot = await db.collection("results").get();
-            
             document.getElementById('loader').style.display = "none";
             document.getElementById('main-table').style.display = "table";
             document.getElementById('status-box').style.display = "flex";
@@ -147,7 +138,6 @@
         }
     }
 
-    // 3. 刪除功能
     async function deleteEntry(docId, name) {
         if (confirm(`⚠️ 警告：確定要刪除受試者「${name}」的數據嗎？\n刪除後將無法恢復！`)) {
             try {
@@ -160,7 +150,7 @@
         }
     }
 
-    // 4. 清洗與匯出完美 Excel
+    // 💡 全部改為英文欄位，並新增 Subject_ID 與 Text_Feedback
     async function downloadSingleExcel(docId, subjectId) {
         try {
             const doc = await db.collection("results").doc(docId).get();
@@ -171,56 +161,53 @@
             if (data.trialsData && data.trialsData.length > 0) {
                 const feedbackInfo = data.feedback || {};
                 
-                // --- 🚀 開始清洗數據 ---
+                // 擷取受試者填寫的文字回饋 (若無則顯示 "無")
+                const extraFeedbackText = feedbackInfo.feedback ? feedbackInfo.feedback : "無";
+                
                 const cleanedTrials = data.trialsData.map((t, index) => {
-                    // 檢查這題在不在使用者的 feedback 勾選名單內 (doubt_0, doubt_1...)
                     const isDoubted = feedbackInfo[`doubt_${index}`] ? 1 : 0;
                     
-                    let userResp = "未作答";
-                    if (t.response === 'f') userResp = "符合(F)";
-                    if (t.response === 'j') userResp = "不符(J)";
+                    let userResp = "timeout";
+                    if (t.response === 'f') userResp = "match";
+                    if (t.response === 'j') userResp = "mismatch";
 
-                    // 重建乾淨的資料結構 (排除 node_id, trial_index, phase, timeout 等)
+                    // 確保舊資料若是中文也能轉為英文
+                    let condStr = t.condition;
+                    if(condStr === "重複_匹配") condStr = "repeat_match";
+                    if(condStr === "重複_不匹配") condStr = "repeat_mismatch";
+                    if(condStr === "不重複_匹配") condStr = "non-repeat_match";
+                    if(condStr === "不重複_不匹配") condStr = "non-repeat_mismatch";
+
                     return {
-                        "區塊順序 (Block)": t.block_order,
-                        "區塊條件": t.block_condition === 'high' ? '高相關' : '低相關',
-                        "題目呈現 (Stimulus)": `${t.cue} ➔ ${t.target}`,  // ✨ 美化過後的顯示方式
-                        "刺激類別 (Cue)": t.cue,
-                        "目標詞彙 (Target)": t.target,
-                        "實驗配對條件": t.condition,
-                        "正確解答": t.match ? "符合" : "不符",
-                        "受試者作答": userResp,
-                        "是否正確 (1/0)": t.correct ? 1 : 0,           // 變成 1 / 0 方便跑統計
-                        "反應時間 (ms)": t.rt !== null ? Math.round(t.rt) : "逾時",
-                        "受試者標記疑義": isDoubted                  // ✨ 1 = 有勾選, 0 = 沒勾選
+                        "Subject_ID": subjectId,
+                        "Block": t.block_order,
+                        "Block_Condition": t.block_condition,
+                        "Stimulus": `${t.cue} ➔ ${t.target}`,
+                        "Cue": t.cue,
+                        "Target": t.target,
+                        "Condition": condStr,
+                        "Correct_Answer": t.match ? "match" : "mismatch",
+                        "User_Response": userResp,
+                        "Is_Correct": t.correct ? 1 : 0,
+                        "RT_ms": t.rt !== null ? Math.round(t.rt) : "timeout",
+                        "Doubt_Flag": isDoubted,
+                        "Text_Feedback": extraFeedbackText  // 💡 文字回饋在此！
                     };
                 });
 
                 const wsTrials = XLSX.utils.json_to_sheet(cleanedTrials);
                 
-                // 自動設定 Excel 每一欄的寬度，打開就整齊
+                // 自動設定 Excel 每一欄的寬度
                 wsTrials['!cols'] = [
-                    {wch: 16}, {wch: 12}, {wch: 22}, {wch: 15}, {wch: 15}, 
-                    {wch: 18}, {wch: 12}, {wch: 14}, {wch: 16}, {wch: 15}, {wch: 18}
+                    {wch: 15}, {wch: 8}, {wch: 15}, {wch: 22}, {wch: 10}, 
+                    {wch: 10}, {wch: 20}, {wch: 15}, {wch: 15}, {wch: 12}, 
+                    {wch: 10}, {wch: 12}, {wch: 30}
                 ];
 
-                XLSX.utils.book_append_sheet(wb, wsTrials, "實驗數據清洗版");
+                XLSX.utils.book_append_sheet(wb, wsTrials, "Export_Data");
             }
 
-            // 第二個分頁：只留受試者手打的文字回饋意見
-            let extraFeedbackText = "無";
-            if (data.feedback && data.feedback.feedback) {
-                extraFeedbackText = data.feedback.feedback;
-            }
-            const wsFeedback = XLSX.utils.json_to_sheet([{
-                "受試者 ID": subjectId,
-                "其他文字回饋意見": extraFeedbackText
-            }]);
-            wsFeedback['!cols'] = [{wch: 25}, {wch: 100}];
-            XLSX.utils.book_append_sheet(wb, wsFeedback, "文字回饋");
-
-            // 下載
-            XLSX.writeFile(wb, `語意飽和實驗_${subjectId}.xlsx`);
+            XLSX.writeFile(wb, `Semantic_Data_${subjectId}.xlsx`);
         } catch (e) {
             console.error(e);
             alert("匯出失敗：" + e.message);
