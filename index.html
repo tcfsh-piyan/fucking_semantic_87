@@ -150,7 +150,6 @@
         }
     }
 
-    // 💡 全部改為英文欄位，並新增 Subject_ID 與 Text_Feedback
     async function downloadSingleExcel(docId, subjectId) {
         try {
             const doc = await db.collection("results").doc(docId).get();
@@ -160,8 +159,6 @@
 
             if (data.trialsData && data.trialsData.length > 0) {
                 const feedbackInfo = data.feedback || {};
-                
-                // 擷取受試者填寫的文字回饋 (若無則顯示 "無")
                 const extraFeedbackText = feedbackInfo.feedback ? feedbackInfo.feedback : "無";
                 
                 const cleanedTrials = data.trialsData.map((t, index) => {
@@ -171,7 +168,6 @@
                     if (t.response === 'f') userResp = "match";
                     if (t.response === 'j') userResp = "mismatch";
 
-                    // 確保舊資料若是中文也能轉為英文
                     let condStr = t.condition;
                     if(condStr === "重複_匹配") condStr = "repeat_match";
                     if(condStr === "重複_不匹配") condStr = "repeat_mismatch";
@@ -191,13 +187,13 @@
                         "Is_Correct": t.correct ? 1 : 0,
                         "RT_ms": t.rt !== null ? Math.round(t.rt) : "timeout",
                         "Doubt_Flag": isDoubted,
-                        "Text_Feedback": extraFeedbackText  // 💡 文字回饋在此！
+                        // 💡 只有在第一列(index === 0)時才會填入文字回饋，其餘留白
+                        "Text_Feedback": index === 0 ? extraFeedbackText : ""  
                     };
                 });
 
                 const wsTrials = XLSX.utils.json_to_sheet(cleanedTrials);
                 
-                // 自動設定 Excel 每一欄的寬度
                 wsTrials['!cols'] = [
                     {wch: 15}, {wch: 8}, {wch: 15}, {wch: 22}, {wch: 10}, 
                     {wch: 10}, {wch: 20}, {wch: 15}, {wch: 15}, {wch: 12}, 
