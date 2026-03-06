@@ -29,33 +29,23 @@
         }
 
         .container { max-width: 1100px; margin: 0 auto; background: var(--card-bg); padding: 30px; border-radius: 15px; box-shadow: 0 10px 30px rgba(0,0,0,0.05); }
-
-        /* Header 樣式 */
         .header { display: flex; justify-content: space-between; align-items: center; margin-bottom: 25px; }
         .title-group { display: flex; align-items: center; gap: 15px; }
         .title-group h1 { margin: 0; font-size: 1.8rem; }
         .badge { background: #e1f0ff; color: #007bff; padding: 4px 12px; border-radius: 20px; font-size: 0.85rem; font-weight: bold; }
-
-        /* 狀態列 */
         .status-bar { background-color: #d4edda; color: #155724; padding: 15px 20px; border-radius: 8px; margin-bottom: 25px; display: flex; align-items: center; gap: 10px; }
-
-        /* 按鈕基礎樣式 */
         .btn { border: none; padding: 8px 16px; border-radius: 6px; cursor: pointer; font-weight: bold; display: inline-flex; align-items: center; gap: 8px; transition: 0.2s; color: white; }
         .btn:active { transform: scale(0.95); }
         .btn-refresh { background-color: var(--primary); }
         .btn-excel { background-color: var(--success); }
         .btn-delete { background-color: var(--danger); }
         .btn-delete:hover { background-color: #c0392b; }
-
-        /* 表格樣式 */
         table { width: 100%; border-collapse: collapse; margin-top: 10px; }
         th { text-align: left; color: var(--text-light); border-bottom: 2px solid #eee; padding: 15px 10px; font-weight: 500; }
         td { padding: 18px 10px; border-bottom: 1px solid #f1f1f1; font-size: 0.95rem; }
-        
         .device-tag { background: #fff0f0; color: #e74c3c; padding: 3px 10px; border-radius: 6px; font-size: 0.8rem; border: 1px solid #ffdada; }
         .device-pc { background: #f0f8ff; color: #3498db; border-color: #cce5ff; }
         .action-group { display: flex; gap: 10px; }
-
         .loading-spinner { text-align: center; padding: 50px; color: var(--text-light); }
     </style>
 </head>
@@ -97,7 +87,7 @@
 </div>
 
 <script>
-    // 1. Firebase 配置 (已套用您最新成功寫入的設定)
+    // 1. Firebase 配置
     const firebaseConfig = {
       apiKey: "AIzaSyDig0LXShXvoUC-Q_jsB4fnt04ndT4AKMI",
       authDomain: "fucking-semantic.firebaseapp.com",
@@ -115,7 +105,6 @@
     async function fetchData() {
         const tbody = document.getElementById('table-body');
         try {
-            // 從我們剛剛 app.js 寫入的 "results" 集合抓取資料
             const snapshot = await db.collection("results").get();
             
             document.getElementById('loader').style.display = "none";
@@ -124,15 +113,10 @@
             document.getElementById('data-count').innerText = snapshot.size;
 
             tbody.innerHTML = "";
-            
-            // 將資料轉存成陣列並依時間排序 (最新在最上面)
             let dataArray = [];
-            snapshot.forEach(doc => {
-                dataArray.push({ id: doc.id, ...doc.data() });
-            });
+            snapshot.forEach(doc => { dataArray.push({ id: doc.id, ...doc.data() }); });
             dataArray.sort((a, b) => new Date(b.completionTime) - new Date(a.completionTime));
 
-            // 渲染表格
             dataArray.forEach(d => {
                 const totalCount = d.totalTrials || 0;
                 const acc = d.accuracy !== undefined ? d.accuracy : 0;
@@ -159,7 +143,6 @@
                 tbody.appendChild(tr);
             });
         } catch (e) {
-            console.error(e);
             alert("讀取失敗：" + e.message);
         }
     }
@@ -170,50 +153,80 @@
             try {
                 await db.collection("results").doc(docId).delete();
                 alert("✅ 數據已安全刪除");
-                location.reload(); // 刪除後自動重新整理頁面
+                location.reload(); 
             } catch (e) {
                 alert("❌ 刪除失敗：" + e.message);
             }
         }
     }
 
-    // 4. 單筆下載 Excel 功能 (整合 Trials 試次資料與 Feedback 疑義表單)
+    // 4. 清洗與匯出完美 Excel
     async function downloadSingleExcel(docId, subjectId) {
         try {
             const doc = await db.collection("results").doc(docId).get();
-            if (!doc.exists) {
-                alert("找不到該筆資料！");
-                return;
-            }
+            if (!doc.exists) return alert("找不到該筆資料！");
             const data = doc.data();
             const wb = XLSX.utils.book_new();
 
-            // 第一個工作表：120 題的詳細反應數據
             if (data.trialsData && data.trialsData.length > 0) {
-                const wsTrials = XLSX.utils.json_to_sheet(data.trialsData);
-                XLSX.utils.book_append_sheet(wb, wsTrials, "詳細試次 (Trials)");
+                const feedbackInfo = data.feedback || {};
+                
+                // --- 🚀 開始清洗數據 ---
+                const cleanedTrials = data.trialsData.map((t, index) => {
+                    // 檢查這題在不在使用者的 feedback 勾選名單內 (doubt_0, doubt_1...)
+                    const isDoubted = feedbackInfo[`doubt_${index}`] ? 1 : 0;
+                    
+                    let userResp = "未作答";
+                    if (t.response === 'f') userResp = "符合(F)";
+                    if (t.response === 'j') userResp = "不符(J)";
+
+                    // 重建乾淨的資料結構 (排除 node_id, trial_index, phase, timeout 等)
+                    return {
+                        "區塊順序 (Block)": t.block_order,
+                        "區塊條件": t.block_condition === 'high' ? '高相關' : '低相關',
+                        "題目呈現 (Stimulus)": `${t.cue} ➔ ${t.target}`,  // ✨ 美化過後的顯示方式
+                        "刺激類別 (Cue)": t.cue,
+                        "目標詞彙 (Target)": t.target,
+                        "實驗配對條件": t.condition,
+                        "正確解答": t.match ? "符合" : "不符",
+                        "受試者作答": userResp,
+                        "是否正確 (1/0)": t.correct ? 1 : 0,           // 變成 1 / 0 方便跑統計
+                        "反應時間 (ms)": t.rt !== null ? Math.round(t.rt) : "逾時",
+                        "受試者標記疑義": isDoubted                  // ✨ 1 = 有勾選, 0 = 沒勾選
+                    };
+                });
+
+                const wsTrials = XLSX.utils.json_to_sheet(cleanedTrials);
+                
+                // 自動設定 Excel 每一欄的寬度，打開就整齊
+                wsTrials['!cols'] = [
+                    {wch: 16}, {wch: 12}, {wch: 22}, {wch: 15}, {wch: 15}, 
+                    {wch: 18}, {wch: 12}, {wch: 14}, {wch: 16}, {wch: 15}, {wch: 18}
+                ];
+
+                XLSX.utils.book_append_sheet(wb, wsTrials, "實驗數據清洗版");
             }
 
-            // 第二個工作表：受試者的疑義覆核表單與文字回饋
-            if (data.feedback && Object.keys(data.feedback).length > 0) {
-                // 將物件格式轉換成陣列，方便匯出 Excel
-                const feedbackArray = Object.keys(data.feedback).map(key => ({
-                    "題目/欄位": key,
-                    "受試者填寫內容": data.feedback[key] === true ? "有疑義 (已勾選)" : data.feedback[key]
-                }));
-                const wsFeedback = XLSX.utils.json_to_sheet(feedbackArray);
-                XLSX.utils.book_append_sheet(wb, wsFeedback, "疑義覆核與回饋");
+            // 第二個分頁：只留受試者手打的文字回饋意見
+            let extraFeedbackText = "無";
+            if (data.feedback && data.feedback.feedback) {
+                extraFeedbackText = data.feedback.feedback;
             }
+            const wsFeedback = XLSX.utils.json_to_sheet([{
+                "受試者 ID": subjectId,
+                "其他文字回饋意見": extraFeedbackText
+            }]);
+            wsFeedback['!cols'] = [{wch: 25}, {wch: 100}];
+            XLSX.utils.book_append_sheet(wb, wsFeedback, "文字回饋");
 
-            // 下載檔案
-            XLSX.writeFile(wb, `語意飽和實驗數據_${subjectId}.xlsx`);
+            // 下載
+            XLSX.writeFile(wb, `語意飽和實驗_${subjectId}.xlsx`);
         } catch (e) {
             console.error(e);
             alert("匯出失敗：" + e.message);
         }
     }
 
-    // 網頁載入後立即獲取數據
     fetchData();
 </script>
 
